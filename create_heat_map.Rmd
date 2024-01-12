@@ -1,0 +1,412 @@
+---
+title: "Shot analysis for the five major European leagues"
+output:
+  html_document: default
+---
+
+```{r, include=FALSE}
+library(ggsoccer)
+library(worldfootballR)
+library(ggplot2)
+library(dplyr)
+library(tidyverse)
+library(gridExtra)
+library(magick)
+library(adegraphics)
+library(ggimage)
+library(ggridges)
+library(grid)
+library(png)
+library(gtExtras)
+library(gt)
+```
+
+# Introduction
+
+Football is undoubtedly one of the sports in which data is most widely used. It is now possible to find data for every type of action and play. A large proportion of this data is accessible to the general public via api or packages. In this project, we are going to use the R package [worldfootballR](https://github.com/JaseZiv/worldfootballR) to visualise and analyse team shots in the five major European leagues. In the first part, we will visualise the position of the teams' shots using heat maps. We will then analyse the ratio of shots to goals scored in the five leagues studied.
+
+This study is based on data from the five European leagues from the start of this season (2023-24) to 30/11/2023.
+
+# Visualisation of shots for each team
+
+In this section, we're going to try and create a visualisation of the teams' shots in the form of a heat map. This type of visualisation is often used because it's easy to understand and produce. This work will also allow us to demonstrate how easy it is to create a heat map once we have the data.
+
+## Importing data
+
+The data is imported using the `understat_league_season_shots` function. The data is retrieved from the [Understat] site (https://understat.com/).
+
+```{r}
+#bundesliga <- understat_league_season_shots("Bundesliga", 2023)
+#ligue1 <- understat_league_season_shots("Ligue 1", 2023)
+#Liga <- understat_league_season_shots("La liga", 2023)
+#Premier_League <- understat_league_season_shots("EPL", 2023)
+#Serie_A <- understat_league_season_shots("Serie A", 2023)
+```
+
+```{r}
+bundesliga <- read.csv("data/bundesliga.csv")
+ligue1 <- read.csv("data/ligue1.csv")
+Liga <- read.csv("data/Liga.csv")
+Premier_League <- read.csv("data/Premier_League.csv")
+Serie_A <- read.csv("data/Serie_A.csv")
+```
+
+Once the data has been imported, we transform it into a 'tibble' object to make it easier to manipulate.
+
+```{r}
+bundesliga <- as_tibble(bundesliga)
+ligue1 <- as_tibble(ligue1)
+Liga <- as_tibble(Liga)
+Premier_League <- as_tibble(Premier_League)
+Serie_A <- as_tibble(Serie_A)
+```
+
+This is what one of our five datasets looks like (each dataset has the same structure):
+
+```{r}
+head(bundesliga)
+```
+
+Here are the game situations taken into account in our data:
+
+```{r}
+unique(bundesliga$situation)
+```
+
+## Get team names
+
+We save the team names in vectors to make it easier to visualise them later.
+
+```{r}
+bundesliga_teams <- unique(bundesliga$home_team)
+ligue1_teams <- unique(ligue1$home_team)
+Liga_teams <- unique(Liga$home_team)
+Premier_League_teams <- unique(Premier_League$home_team)
+Serie_A_teams <- unique(Serie_A$home_team)
+```
+
+```{r}
+bundesliga_teams
+```
+
+## Creation of a function for displaying a heat map of shots fired
+
+To create the heat map function, two elements are important:
+
+* **The [ggsoccer](https://github.com/Torvaney/ggsoccer) package**: This package allows us to represent the football pitch using the `annotate_pitch` and `theme_pitch` functions.
+* **The [stat_density_2d](https://ggplot2.tidyverse.org/reference/geom_density_2d.html) function**: Used to create a 2d density from X and Y data.
+  
+We will also represent the goals on the heat map using black dots.
+
+```{r}
+# Colors for the heat map
+custom_palette <- c("transparent", "green", "yellow", "orange", "red")
+
+# Heat map function
+heat_map_shots <- function(team, league, df) {
+  data_home <- filter(df, df$home_team == team & df$h_a=="h")
+  data_away <- filter(df, df$away_team == team & df$h_a=="a")
+  data <- bind_rows(data_home, data_away)
+  logo <- readPNG(sprintf("logos/%s/%s.png",league,team))
+  p <- ggplot(data, aes(x=X*100, y=Y*100) ) +
+  annotate_pitch(colour = "white",
+                 fill   = "springgreen4",
+                 limits = FALSE,
+                 linewidth = 1) +
+  theme_pitch() +
+  theme(panel.background = element_rect(fill = "springgreen4")) +
+  stat_density_2d(aes(fill = ..density..), geom = "raster", contour = FALSE) +
+  scale_fill_gradientn(colors = custom_palette, guide = "none") +
+  geom_point(data =filter(data, result=="Goal"), aes(X*100, Y*100), color="black")+
+  coord_flip(xlim = c(49, 101)) +
+  ggtitle(team)+
+  theme(
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+  )+
+  annotation_custom(rasterGrob(logo, width = unit(1, "npc"), height = unit(1, "npc")), 
+                      xmin= 55,xmax = 65, ymin = 85, ymax = 95)
+  return(p)
+}
+```
+
+This is what our heat map looks like:
+
+```{r, warning = FALSE, message=FALSE}
+heat_map_shots("Bayern Munich", "bundesliga", bundesliga)
+```
+
+On this heat map, the colour variation represents the density of shots taken by the team and the black dots represent the goals scored by the team.
+
+Now we're going to create a global representation for each league where we can see the heat map for each club.
+
+## Creating representations for the legend
+
+We're going to create two representations that will serve as the legend for our global representation.
+
+```{r}
+# Legend goals
+data_legend_goal <- data.frame(
+  x = c(1),
+  y = c(1)
+)
+legend_goal <- ggplot(data_legend_goal, aes(x=x,y=y))+
+  geom_point(aes(size=c(7))) +
+  ylim(-1.2,1.2) +
+  xlim(-4,6) +
+  theme_minimal() +
+  ggtitle("Goal")+
+  theme(
+    panel.grid = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+    legend.position = "none"
+  )
+
+# Legend shots
+
+df <- data.frame(value = c(75),
+                 group = c(1))
+
+df_expanded <- df %>%
+  rowwise() %>%
+  summarise(group = group,
+            value = list(0:value)) %>%
+  unnest(cols = value)
+
+legend_shots <- df_expanded %>%
+  ggplot() +
+  geom_tile(aes(
+    x = group,
+    y = value,
+    fill = value,
+    width = 0.9
+  )) +
+  coord_flip() +
+  scale_fill_gradientn(colors = custom_palette, guide = "none") +
+  theme(legend.position = "none") +
+  xlim(0,2) +
+  theme_minimal() +
+  ggtitle("Shots density")+
+  theme(
+    panel.grid = element_blank(),
+    axis.title.x = element_blank(),
+    axis.title.y = element_blank(),
+    axis.text = element_blank(),
+    plot.title = element_text(hjust = 0.5, size = 20, face = "bold")
+  )
+```
+
+
+## Creating lists with each club's heat map
+
+For each league, we create a list with the heat map for each team, to which we add the two legend representations.
+
+```{r, warning=FALSE, message=FALSE}
+# Bundesliga
+plots_bundesliga <- lapply(bundesliga_teams, function(i) {
+  heat_map_shots(i, "bundesliga", bundesliga)
+})
+plots_bundesliga <- c(list(legend_goal, legend_shots), plots_bundesliga)
+# Ligue 1
+plots_ligue1 <- lapply(ligue1_teams, function(i) {
+  heat_map_shots(i, "Ligue_1", ligue1)
+})
+plots_ligue1 <- c(list(legend_goal, legend_shots), plots_ligue1)
+# Premier League
+plots_Premier_League <- lapply(Premier_League_teams, function(i) {
+  heat_map_shots(i, "Premier League", Premier_League)
+})
+plots_Premier_League <- c(list(legend_goal, legend_shots), plots_Premier_League)
+# La Liga
+plots_Liga <- lapply(Liga_teams, function(i) {
+  heat_map_shots(i, "liga", Liga)
+})
+plots_Liga <- c(list(legend_goal, legend_shots), plots_Liga)
+# Serie A
+plots_Serie_A <- lapply(Serie_A_teams, function(i) {
+  heat_map_shots(i, "Serie A", Serie_A)
+})
+plots_Serie_A <- c(list(legend_goal, legend_shots), plots_Serie_A)
+```
+
+## Global representations
+
+Here are the global heat map representations for each team in our five championships.
+
+### Bundesliga
+
+```{r, fig.height = 25, fig.width=8, echo=FALSE}
+grid.arrange(grobs = plots_bundesliga, ncol=2)
+```
+
+### Ligue 1
+
+```{r, fig.height = 25, fig.width=8, echo=FALSE}
+grid.arrange(grobs = plots_ligue1, ncol=2)
+```
+
+### Premier League
+
+```{r, fig.height = 28, fig.width=8, echo=FALSE}
+grid.arrange(grobs = plots_Premier_League, ncol=2)
+```
+
+### La Liga
+
+```{r, fig.height = 28, fig.width=8, echo=FALSE}
+grid.arrange(grobs = plots_Liga, ncol=2)
+```
+
+### Serie A
+
+```{r, fig.height = 28, fig.width=8, echo=FALSE}
+grid.arrange(grobs = plots_Serie_A, ncol=2)
+```
+
+These representations are very interesting because they give us an idea of how each team attacks the goal. Some teams, such as **Atletico Madrid**, will shoot very close to goal, while others, such as **Lecce**, will diversify their shooting zones and take many of their shots from outside the box. These representations also allow us to see that some teams score almost exclusively from one side of the pitch, such as **Liverpool** (left), or from several areas inside and outside the box, such as **Naples**.
+
+```{r, warning=FALSE, message=FALSE, echo=FALSE}
+p_atletico <- heat_map_shots("Atletico Madrid", "liga", Liga)
+p_lecce <- heat_map_shots("Lecce","Serie A", Serie_A)
+p_liverpool <- heat_map_shots("Liverpool", "Premier League", Premier_League)
+p_napoli <- heat_map_shots("Napoli", "Serie A", Serie_A)
+
+plots_example <- list(p_atletico, p_lecce, p_liverpool, p_napoli)
+
+grid.arrange(grobs = plots_example, ncol=2)
+```
+
+# Shots/goals comparison
+
+In this section, we'll look at each team's efficiency in front of goal by looking at their shots/goals scored ratio.
+
+## Dataset with each team's shots and goals
+
+The function returns a dataframe with the number of shots and goals for each team in a league.
+
+```{r}
+df_sg <- function(df, teams, league){
+  shots <- c()
+  goals <- c()
+  LogoPath <- c()
+  for(team in teams){
+    data_home <- filter(df, df$home_team == team & df$h_a=="h")
+    data_away <- filter(df, df$away_team == team & df$h_a=="a")
+    data_team <- bind_rows(data_home, data_away)
+    shots <- c(shots, nrow(data_team))
+    goals <- c(goals, nrow(filter(data_team, result=="Goal")))
+    LogoPath <- c(LogoPath, sprintf("logos/%s/%s.png",league, team))
+  }
+  sg <- tibble(team = teams, shots, goals, logos = LogoPath)
+  sg <-column_to_rownames(sg, var="team")
+  return(sg)
+}
+```
+
+```{r}
+df_sg_bundesliga <- df_sg(bundesliga, bundesliga_teams, "bundesliga")
+df_sg_ligue_1 <- df_sg(ligue1, ligue1_teams, "Ligue_1")
+df_sg_premier_league <- df_sg(Premier_League, Premier_League_teams, "Premier League")
+df_sg_liga <- df_sg(Liga, Liga_teams, "liga")
+df_sg_serie_a <- df_sg(Serie_A, Serie_A_teams, "Serie A")
+```
+
+```{r}
+head(df_sg_ligue_1)
+```
+
+## Function to display shots and goals
+
+```{r}
+plot_sg <- function(df, league, size=.1){
+  ggplot(df, aes(shots, goals)) + 
+    geom_smooth(method=lm, color="red", fill="blue", se=TRUE) +
+    geom_image(aes(image=logos), size=size) +
+    ggtitle(sprintf("Shots / Goals comparison %s", league)) +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, size = 20, face = "bold"),
+      axis.title.x = element_text(hjust = 0.5, size = 15),
+      axis.title.y = element_text(hjust = 0.5, size = 15),
+      axis.line = element_line(colour = "black"),
+      axis.text.x = element_text(face = "bold"),
+      axis.text.y = element_text(face = "bold")
+    )
+}
+```
+
+## Representations
+
+### Bundesliga
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+plot_sg(df_sg_bundesliga, "Bundesliga")
+```
+
+### Ligue 1
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+plot_sg(df_sg_ligue_1, "Ligue 1")
+```
+
+### Premier League
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+plot_sg(df_sg_premier_league, "Premier League")
+```
+
+### La Liga
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+plot_sg(df_sg_liga, "La Liga")
+```
+
+### Serie A
+
+```{r, message=FALSE, warning=FALSE, echo=FALSE}
+plot_sg(df_sg_serie_a, "Serie A")
+```
+
+These representations are very interesting and show that the more shots you take, the more you score. However, this is not the case for all teams. In Ligue 1, **Clermont** and **Lyon** lack realism and are average in terms of shots, but are the two worst teams in terms of goals scored. In the Premier League, **Newcastle** are exceptionally realistic, with the tenth-most shots on goal but the second-most goals scored. This phenomenon also applies in La Liga with **Atletico Madrid** and **Girone**. These two teams, who are in the top three in the Spanish league, take almost as many shots as the 18th-placed **Celta Vigo**. In Germany and Italy, the ratio of shots to goals is fairly similar for almost all the teams.
+
+### Comparison between championships
+
+```{r}
+df_sg_all <- bind_rows(df_sg_bundesliga, df_sg_liga, df_sg_ligue_1, df_sg_premier_league, df_sg_serie_a)
+```
+
+```{r, message=FALSE, warning=FALSE, fig.width=12, fig.height=8, echo=FALSE}
+plot_sg(df_sg_all, "big 5 teams")
+```
+
+Now, when we compare the shots/goals ratio between all the teams in the five European leagues, we can see that **Bayer Leverkusen**, Bundesliga leaders, are one of the European teams with the most realism. The fact that we didn't notice this team in our first representations may testify to the realism of German teams in front of goal. However, we need to take a step back from this representation, because at this point in the season, the number of matches played by the teams differs according to the league (Ligue 1: 12 matches, Bundesliga: 12 matches, Premier League: 13 matches, Serie A: 13 matches, La Liga: 14 matches).
+
+### Realism ranking
+
+Finally, we can produce a ranking of realism in front of goal. To do this, we're going to rank the teams according to their number of goals divided by the number of shots.
+
+```{r}
+df_sg_all["ratio"] = df_sg_all$goals/df_sg_all$shots
+```
+
+Here are the 10 teams with the best goalscoring record:
+
+```{r}
+head(arrange(df_sg_all, desc(ratio))[c("ratio")],10)
+```
+In this ranking, we find at the top some of the over-performing teams mentioned earlier.
+
+Here are the ten teams who were least realistic in front of goal:
+
+```{r}
+head(arrange(df_sg_all, ratio)[c("ratio")],10)
+```
+
+As with the top of the table, here we find some of the teams who were previously singled out for their lack of realism.
+
+# Conclusion
+
+In conclusion, we were able to show how easy it is to create and analyse team shot representations for the five major European leagues. Analyses of the teams' shots/goals ratios have shown us that several teams that we didn't expect to be at the top of the European rankings, such as **Bayer Leverkusen**, **Stuttgart**, **Girone** and **Hoffenheim**, are very realistic in front of goal. It will be interesting to repeat this study at the end of the season to see whether the trends have been confirmed or refuted. We could also carry out in-depth analyses of the position of the teams' shots and goals.
+
